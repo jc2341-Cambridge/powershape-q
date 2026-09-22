@@ -2,47 +2,50 @@
 
 from __future__ import annotations
 
-import importlib.util
-import sys
 from concurrent.futures import ProcessPoolExecutor, as_completed
-from pathlib import Path
 
 import numpy as np
 import pandas as pd
 
-
-HERE = Path(__file__).resolve().parent
-SPEC = importlib.util.spec_from_file_location(
-    "revision_experiments_capacity_replay", HERE / "run_revision_experiments.py"
-)
-mod = importlib.util.module_from_spec(SPEC)
-assert SPEC.loader is not None
-sys.modules[SPEC.name] = mod
-SPEC.loader.exec_module(mod)
+from scheduling import campaign as mod
 
 CAPS_KW = (10, 12, 14)
+N_SEEDS = 24
+N_REPLAYS = 200
+SOLVER_TIME_LIMIT_S = 300.0
 
 
-def run_cap(cap_kW: int) -> list[dict]:
-    mod.FEEDER_CAP_W = float(cap_kW * 1000)
+def run_cap(cap_kw: int) -> list[dict]:
+    """Optimise and replay the robust admission schedule at one cap."""
+
+    mod.FEEDER_CAP_W = float(cap_kw * 1000)
     cells, traces, _ = mod.build_cells()
     rows: list[dict] = []
-    for seed in range(24):
+    for seed in range(N_SEEDS):
         instance = mod.build_instance(cells, seed)
         mats = mod.matrices(instance, cells, "robust")
-        work = mod.solve_work(instance, mats, time_limit_s=300.0)
-        if not work["certified"]:
-            raise RuntimeError(f"uncertified cap={cap_kW}, seed={seed}")
-        rng = np.random.default_rng(810000 + 1000 * cap_kW + seed)
-        for replay_id in range(200):
-            outcome = mod.replay_once(instance, work["selected"], cells, traces, rng)
+        admission = mod.solve_work(instance, mats, time_limit_s=SOLVER_TIME_LIMIT_S)
+        if not admission["certified"]:
+            raise RuntimeError(
+                f"admission stage is uncertified for cap={cap_kw} kW, seed={seed}"
+            )
+        admitted_jobs = {instance.placements[v].job for v in admission["selected"]}
+        rng = np.random.default_rng(810000 + 1000 * cap_kw + seed)
+        for replay_id in range(N_REPLAYS):
+            outcome = mod.replay_once(
+                instance,
+                admission["selected"],
+                cells,
+                traces,
+                rng,
+            )
             outcome.update(
                 {
-                    "cap_kW": cap_kW,
+                    "cap_kW": cap_kw,
                     "seed": seed,
                     "replay": replay_id,
-                    "admitted_requests": work["work"],
-                    "admitted_jobs": len(work["selected"]),
+                    "admitted_requests": admission["work"],
+                    "admitted_jobs": len(admitted_jobs),
                 }
             )
             rows.append(outcome)

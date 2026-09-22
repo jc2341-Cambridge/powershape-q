@@ -2,25 +2,14 @@
 
 from __future__ import annotations
 
-import importlib.util
 import json
 import math
-import sys
-from pathlib import Path
 
 import numpy as np
 from scipy.optimize import Bounds, LinearConstraint, milp
 from scipy.sparse import coo_matrix
 
-
-ROOT = Path(__file__).resolve().parents[1]
-SPEC = importlib.util.spec_from_file_location(
-    "revision_experiments", ROOT / "scripts" / "run_revision_experiments.py"
-)
-mod = importlib.util.module_from_spec(SPEC)
-assert SPEC.loader is not None
-sys.modules[SPEC.name] = mod
-SPEC.loader.exec_module(mod)
+from scheduling import campaign as mod
 
 
 def pairwise_graph(
@@ -42,8 +31,10 @@ def pairwise_graph(
             else:
                 for h, cap in mod.RAMP_CAPS_W_PER_S.items():
                     if (
-                        np.max(mats["ramp_hi"][h][i] + mats["ramp_hi"][h][j]) > cap + 1e-9
-                        or np.min(mats["ramp_lo"][h][i] + mats["ramp_lo"][h][j]) < -cap - 1e-9
+                        np.max(mats["ramp_hi"][h][i] + mats["ramp_hi"][h][j])
+                        > cap + 1e-9
+                        or np.min(mats["ramp_lo"][h][i] + mats["ramp_lo"][h][j])
+                        < -cap - 1e-9
                     ):
                         reason = "ramp"
                         break
@@ -72,7 +63,11 @@ def solve_mwis(instance: mod.Instance, edges: list[tuple[int, int]]) -> dict:
         bounds=Bounds(np.zeros(n), np.ones(n)),
         options={"time_limit": 300.0, "presolve": True, "mip_rel_gap": 1e-9},
     )
-    selected = np.flatnonzero(result.x > 0.5).astype(int).tolist() if result.x is not None else []
+    selected = (
+        np.flatnonzero(result.x > 0.5).astype(int).tolist()
+        if result.x is not None
+        else []
+    )
     return {
         "selected": selected,
         "work": float(weights[selected].sum()) if selected else 0.0,
@@ -83,7 +78,9 @@ def solve_mwis(instance: mod.Instance, edges: list[tuple[int, int]]) -> dict:
     }
 
 
-def qubo_counts(instance: mod.Instance, mats_nominal: dict) -> tuple[dict, np.ndarray, np.ndarray]:
+def qubo_counts(
+    instance: mod.Instance, mats_nominal: dict
+) -> tuple[dict, np.ndarray, np.ndarray]:
     power = mats_nominal["power"]
     p_hat = power / mod.FEEDER_CAP_W
     gram_p = p_hat @ p_hat.T
@@ -181,7 +178,9 @@ def main() -> None:
         "pairwise_graph": {
             "vertices": len(instance.placements),
             "edges": len(edges),
-            "density": 2 * len(edges) / (len(instance.placements) * (len(instance.placements) - 1)),
+            "density": 2
+            * len(edges)
+            / (len(instance.placements) * (len(instance.placements) - 1)),
             "edge_reasons": reasons,
             "mwis_certified": mwis["certified"],
             "mwis_work": mwis["work"],

@@ -16,7 +16,9 @@ from .qaoa_circuit import canonical_counts
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Collect QPU results recorded in a task manifest.")
+    parser = argparse.ArgumentParser(
+        description="Collect QPU results recorded in a task manifest."
+    )
     parser.add_argument("manifest", type=Path)
     args = parser.parse_args()
 
@@ -24,7 +26,9 @@ def main() -> None:
     if not payload.get("submitted") or not payload.get("tasks"):
         raise SystemExit("manifest contains no submitted tasks")
 
-    is_aquila = payload.get("target") == "aquila" or "AHS" in payload.get("protocol", "")
+    is_aquila = payload.get("target") == "aquila" or "AHS" in payload.get(
+        "protocol", ""
+    )
     for record in payload["tasks"]:
         task = AwsQuantumTask(record["task_arn"])
         result = task.result()
@@ -32,7 +36,9 @@ def main() -> None:
         if is_aquila:
             record.update(_decode_measurements(result.measurements))
         else:
-            counts = canonical_counts(dict(result.measurement_counts), REDUCED_INSTANCE.n_variables)
+            counts = canonical_counts(
+                dict(result.measurement_counts), REDUCED_INSTANCE.n_variables
+            )
             record["measurement_counts"] = counts
             record["top_candidates"] = _analyse_counts(counts)
 

@@ -33,14 +33,16 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 from scipy.optimize import Bounds, LinearConstraint, milp
-from scipy.sparse import csr_matrix, hstack, vstack
+from scipy.sparse import csr_matrix, hstack
 
 
 ROOT = Path(__file__).resolve().parents[1]
 RESULTS = ROOT / "results"
-DATASET = Path(
-    os.environ.get("POWERSHAPE_Q_DATASET", str(ROOT / "data"))
-).expanduser().resolve()
+DATASET = (
+    Path(os.environ.get("POWERSHAPE_Q_DATASET", str(ROOT / "data")))
+    .expanduser()
+    .resolve()
+)
 OFFLINE = DATASET / "01_aggregated_datasets" / "inference_offline_llama3_70b"
 
 DT_S = 1.0
@@ -107,16 +109,22 @@ class Instance:
     horizon: int
 
 
-def transition_complete(power: np.ndarray, idle_W: float, transition_s: int) -> np.ndarray:
+def transition_complete(
+    power: np.ndarray, idle_W: float, transition_s: int
+) -> np.ndarray:
     """Add explicit idle-to-active and active-to-idle linear transitions."""
     if power.size < 2:
         raise ValueError("trace must contain at least two samples")
+    if transition_s < 1:
+        raise ValueError("transition_s must be at least one second")
     entry = np.linspace(idle_W, float(power[0]), transition_s + 1)[:-1]
     exit_ = np.linspace(float(power[-1]), idle_W, transition_s + 1)[1:]
     return np.concatenate([entry, power, exit_])
 
 
-def read_run(run_id: int, meta: pd.Series, transition_s: int = TRANSITION_S) -> RunTrace:
+def read_run(
+    run_id: int, meta: pd.Series, transition_s: int = TRANSITION_S
+) -> RunTrace:
     frame = pd.read_parquet(OFFLINE / "results" / f"{run_id:06d}.parquet")
     t = frame.index.to_numpy(dtype=float)
     p = frame["power[W]"].to_numpy(dtype=float)
@@ -146,6 +154,8 @@ def pad_incremental(traces: list[RunTrace], length: int) -> np.ndarray:
 
 
 def finite_difference_rows(values: np.ndarray, h: int) -> np.ndarray:
+    if h < 1:
+        raise ValueError("finite-difference horizon must be positive")
     lagged = np.zeros_like(values)
     if h < values.shape[-1]:
         lagged[..., h:] = values[..., :-h]
@@ -210,9 +220,7 @@ def build_cells(
         # sample.  Without these trailing idle samples, a long-window
         # completion ramp is silently truncated at the template boundary.
         ramp_input = np.pad(train_q, ((0, 0), (0, max(RAMP_CAPS_W_PER_S))))
-        medoid_input = np.pad(
-            profile_q["deterministic"], (0, max(RAMP_CAPS_W_PER_S))
-        )
+        medoid_input = np.pad(profile_q["deterministic"], (0, max(RAMP_CAPS_W_PER_S)))
         for h in RAMP_CAPS_W_PER_S:
             run_ramps = finite_difference_rows(ramp_input, h)
             medoid_ramp = finite_difference_rows(medoid_input, h)
@@ -254,7 +262,8 @@ def build_cells(
                     "run_id": trace.run_id,
                     "split": "test",
                     "medoid_run_id": medoid.run_id,
-                    "duration_error_pct": 100 * (medoid_duration / trace.duration_s - 1),
+                    "duration_error_pct": 100
+                    * (medoid_duration / trace.duration_s - 1),
                     "energy_error_pct": 100 * (medoid_energy / trace.energy_Wh - 1),
                     "peak_error_pct": 100 * (medoid_peak / np.max(trace.power_W) - 1),
                     "test_duration_s": trace.duration_s,
@@ -288,14 +297,14 @@ def build_instance(cells: dict[tuple[int, int], CellModel], seed: int) -> Instan
             starts = [int(release[job])]
         weight = float(cell[0])  # admitted offline requests
         for start in starts:
-            placements.append(
-                Placement(var_id, job, cell, start, duration, weight)
-            )
+            placements.append(Placement(var_id, job, cell, start, duration, weight))
             var_id += 1
     return Instance(seed, placements, job_cells, release, deadline, horizon)
 
 
-def matrices(instance: Instance, cells: dict[tuple[int, int], CellModel], mode: str) -> dict:
+def matrices(
+    instance: Instance, cells: dict[tuple[int, int], CellModel], mode: str
+) -> dict:
     n = len(instance.placements)
     T = instance.horizon + 1
     power = np.zeros((n, T), dtype=float)
@@ -308,15 +317,21 @@ def matrices(instance: Instance, cells: dict[tuple[int, int], CellModel], mode: 
         cell = cells[p.cell]
         q = np.maximum(cell.profile_W[mode] - HARDWARE_IDLE_W_PER_NODE, 0.0)
         end = min(T, p.start + q.size)
-        power[p.var_id, p.start:end] = NODES_PER_JOB * q[: end - p.start]
+        power[p.var_id, p.start : end] = NODES_PER_JOB * q[: end - p.start]
         oend = min(T, p.start + p.occupancy_len)
-        occ[p.var_id, p.start:oend] = 1.0
+        occ[p.var_id, p.start : oend] = 1.0
         for h in RAMP_CAPS_W_PER_S:
             lo, hi = cell.ramp_bounds[mode][h]
             rend = min(T, p.start + lo.size)
-            ramp_lo[h][p.var_id, p.start:rend] = NODES_PER_JOB * lo[: rend - p.start]
-            ramp_hi[h][p.var_id, p.start:rend] = NODES_PER_JOB * hi[: rend - p.start]
-    return {"power": power, "occ": occ, "ramp_lo": ramp_lo, "ramp_hi": ramp_hi, "jobs": jobs}
+            ramp_lo[h][p.var_id, p.start : rend] = NODES_PER_JOB * lo[: rend - p.start]
+            ramp_hi[h][p.var_id, p.start : rend] = NODES_PER_JOB * hi[: rend - p.start]
+    return {
+        "power": power,
+        "occ": occ,
+        "ramp_lo": ramp_lo,
+        "ramp_hi": ramp_hi,
+        "jobs": jobs,
+    }
 
 
 def base_constraints(instance: Instance, mats: dict) -> list[LinearConstraint]:
@@ -345,18 +360,24 @@ def solve_work(instance: Instance, mats: dict, time_limit_s: float) -> dict:
         bounds=Bounds(np.zeros(weights.size), np.ones(weights.size)),
         options={"time_limit": time_limit_s, "presolve": True, "mip_rel_gap": 1e-9},
     )
-    selected = [] if result.x is None else np.flatnonzero(result.x > 0.5).astype(int).tolist()
+    selected = (
+        [] if result.x is None else np.flatnonzero(result.x > 0.5).astype(int).tolist()
+    )
     return {
         "selected": selected,
         "status": int(result.status),
         "message": str(result.message),
         "mip_gap": None if result.mip_gap is None else float(result.mip_gap),
-        "certified": bool(result.status == 0 and result.mip_gap is not None and result.mip_gap <= 1e-8),
+        "certified": bool(
+            result.status == 0 and result.mip_gap is not None and result.mip_gap <= 1e-8
+        ),
         "work": float(weights[selected].sum()) if selected else 0.0,
     }
 
 
-def fixed_job_constraint(instance: Instance, mats: dict, selected: list[int]) -> LinearConstraint:
+def fixed_job_constraint(
+    instance: Instance, mats: dict, selected: list[int]
+) -> LinearConstraint:
     jobs_selected = {instance.placements[v].job for v in selected}
     target = np.array(
         [1.0 if j in jobs_selected else 0.0 for j in range(len(instance.job_cells))]
@@ -364,16 +385,22 @@ def fixed_job_constraint(instance: Instance, mats: dict, selected: list[int]) ->
     return LinearConstraint(csr_matrix(mats["jobs"]), target, target)
 
 
-def solve_peak(instance: Instance, mats: dict, selected: list[int], time_limit_s: float) -> dict:
+def solve_peak(
+    instance: Instance, mats: dict, selected: list[int], time_limit_s: float
+) -> dict:
     n = len(instance.placements)
     constraints: list[LinearConstraint] = []
     for con in base_constraints(instance, mats):
         constraints.append(
-            LinearConstraint(hstack([con.A, csr_matrix((con.A.shape[0], 1))]), con.lb, con.ub)
+            LinearConstraint(
+                hstack([con.A, csr_matrix((con.A.shape[0], 1))]), con.lb, con.ub
+            )
         )
     fixed = fixed_job_constraint(instance, mats, selected)
     constraints.append(
-        LinearConstraint(hstack([fixed.A, csr_matrix((fixed.A.shape[0], 1))]), fixed.lb, fixed.ub)
+        LinearConstraint(
+            hstack([fixed.A, csr_matrix((fixed.A.shape[0], 1))]), fixed.lb, fixed.ub
+        )
     )
     peak_rows = hstack(
         [csr_matrix(mats["power"].T), -np.ones((instance.horizon + 1, 1))],
@@ -389,14 +416,27 @@ def solve_peak(instance: Instance, mats: dict, selected: list[int], time_limit_s
         bounds=Bounds(np.zeros(n + 1), np.r_[np.ones(n), FEEDER_CAP_W]),
         options={"time_limit": time_limit_s, "presolve": True, "mip_rel_gap": 1e-9},
     )
-    chosen = [] if result.x is None else np.flatnonzero(result.x[:n] > 0.5).astype(int).tolist()
-    return {"selected": chosen, "status": int(result.status), "certified": bool(result.status == 0), "incremental_peak_W": None if result.x is None else float(result.x[-1])}
+    chosen = (
+        []
+        if result.x is None
+        else np.flatnonzero(result.x[:n] > 0.5).astype(int).tolist()
+    )
+    return {
+        "selected": chosen,
+        "status": int(result.status),
+        "certified": bool(result.status == 0),
+        "incremental_peak_W": None if result.x is None else float(result.x[-1]),
+    }
 
 
-def solve_earliest(instance: Instance, mats: dict, selected: list[int], time_limit_s: float) -> dict:
+def solve_earliest(
+    instance: Instance, mats: dict, selected: list[int], time_limit_s: float
+) -> dict:
     n = len(instance.placements)
     starts = np.array([p.start for p in instance.placements], dtype=float)
-    constraints = base_constraints(instance, mats) + [fixed_job_constraint(instance, mats, selected)]
+    constraints = base_constraints(instance, mats) + [
+        fixed_job_constraint(instance, mats, selected)
+    ]
     result = milp(
         c=starts,
         constraints=constraints,
@@ -404,8 +444,14 @@ def solve_earliest(instance: Instance, mats: dict, selected: list[int], time_lim
         bounds=Bounds(np.zeros(n), np.ones(n)),
         options={"time_limit": time_limit_s, "presolve": True, "mip_rel_gap": 1e-9},
     )
-    chosen = [] if result.x is None else np.flatnonzero(result.x > 0.5).astype(int).tolist()
-    return {"selected": chosen, "status": int(result.status), "certified": bool(result.status == 0)}
+    chosen = (
+        [] if result.x is None else np.flatnonzero(result.x > 0.5).astype(int).tolist()
+    )
+    return {
+        "selected": chosen,
+        "status": int(result.status),
+        "certified": bool(result.status == 0),
+    }
 
 
 def nominal_metrics(instance: Instance, mats: dict, selected: list[int]) -> dict:
@@ -430,14 +476,35 @@ def nominal_metrics(instance: Instance, mats: dict, selected: list[int]) -> dict
         "peak_over_cap": peak / FEEDER_CAP_W,
         "ramp_ratio": max(ratios),
         "max_concurrency": occ,
-        "feasible": bool(peak <= FEEDER_CAP_W + 1e-6 and max(ratios) <= 1 + 1e-9 and occ <= N_GROUPS + 1e-9),
+        "feasible": bool(
+            peak <= FEEDER_CAP_W + 1e-6
+            and max(ratios) <= 1 + 1e-9
+            and occ <= N_GROUPS + 1e-9
+        ),
     }
 
 
-def replay_once(instance: Instance, selected: list[int], cells: dict, traces: dict[int, RunTrace], rng: np.random.Generator) -> dict:
+def replay_once(
+    instance: Instance,
+    selected: list[int],
+    cells: dict,
+    traces: dict[int, RunTrace],
+    rng: np.random.Generator,
+) -> dict:
     if not selected:
-        return {"peak_W": N_NODES * HARDWARE_IDLE_W_PER_NODE, "power_violation": False, "ramp_violation": False, "concurrency_violation": False, "deadline_violation": False, "feasible": True}
-    max_len = instance.horizon + max(cells[instance.placements[v].cell].occupancy_len for v in selected) + 20
+        return {
+            "peak_W": N_NODES * HARDWARE_IDLE_W_PER_NODE,
+            "power_violation": False,
+            "ramp_violation": False,
+            "concurrency_violation": False,
+            "deadline_violation": False,
+            "feasible": True,
+        }
+    max_len = (
+        instance.horizon
+        + max(cells[instance.placements[v].cell].occupancy_len for v in selected)
+        + 20
+    )
     q_total = np.zeros(max_len, dtype=float)
     occupancy = np.zeros(max_len, dtype=float)
     deadline_violation = False
@@ -452,8 +519,8 @@ def replay_once(instance: Instance, selected: list[int], cells: dict, traces: di
             extra = end - q_total.size
             q_total = np.pad(q_total, (0, extra))
             occupancy = np.pad(occupancy, (0, extra))
-        q_total[p.start:end] += q
-        occupancy[p.start:end] += 1.0
+        q_total[p.start : end] += q
+        occupancy[p.start : end] += 1.0
         deadline_violation |= bool(end - 1 > instance.deadline[p.job])
     total = N_NODES * HARDWARE_IDLE_W_PER_NODE + q_total
     power_violation = bool(np.max(total) > FEEDER_CAP_W + 1e-6)
@@ -472,7 +539,12 @@ def replay_once(instance: Instance, selected: list[int], cells: dict, traces: di
         "ramp_violation": ramp_violation,
         "concurrency_violation": concurrency_violation,
         "deadline_violation": deadline_violation,
-        "feasible": not (power_violation or ramp_violation or concurrency_violation or deadline_violation),
+        "feasible": not (
+            power_violation
+            or ramp_violation
+            or concurrency_violation
+            or deadline_violation
+        ),
     }
 
 
@@ -496,14 +568,22 @@ def run_seed_experiments(
         elapsed = time.perf_counter() - t0
         peak_metrics = nominal_metrics(instance, mats, peak["selected"])
         earliest_metrics = nominal_metrics(instance, mats, earliest["selected"])
-        reduction = 100.0 * (earliest_metrics["peak_W"] - peak_metrics["peak_W"]) / earliest_metrics["peak_W"] if earliest_metrics["peak_W"] else 0.0
+        reduction = (
+            100.0
+            * (earliest_metrics["peak_W"] - peak_metrics["peak_W"])
+            / earliest_metrics["peak_W"]
+            if earliest_metrics["peak_W"]
+            else 0.0
+        )
         rows.append(
             {
                 "seed": seed,
                 "mode": mode,
                 "n_variables": len(instance.placements),
                 "work": work["work"],
-                "n_admitted_jobs": len({instance.placements[v].job for v in work["selected"]}),
+                "n_admitted_jobs": len(
+                    {instance.placements[v].job for v in work["selected"]}
+                ),
                 "work_certified": work["certified"],
                 "work_mip_gap": work["mip_gap"],
                 "peak_certified": peak["certified"],
@@ -521,7 +601,14 @@ def run_seed_experiments(
             "deadline_s": instance.deadline.tolist(),
             "selected": peak["selected"],
             "placements": [
-                {"var_id": p.var_id, "job": p.job, "cell": list(p.cell), "start_s": p.start, "occupancy_len": p.occupancy_len, "weight": p.weight}
+                {
+                    "var_id": p.var_id,
+                    "job": p.job,
+                    "cell": list(p.cell),
+                    "start_s": p.start,
+                    "occupancy_len": p.occupancy_len,
+                    "weight": p.weight,
+                }
                 for p in instance.placements
             ],
         }
@@ -549,7 +636,9 @@ def run_campaign(n_seeds: int, replays: int, time_limit_s: float, workers: int) 
     else:
         with ProcessPoolExecutor(max_workers=workers) as pool:
             futures = {
-                pool.submit(run_seed_experiments, seed, cells, traces, replays, time_limit_s): seed
+                pool.submit(
+                    run_seed_experiments, seed, cells, traces, replays, time_limit_s
+                ): seed
                 for seed in range(n_seeds)
             }
             for future in as_completed(futures):
@@ -564,7 +653,9 @@ def run_campaign(n_seeds: int, replays: int, time_limit_s: float, workers: int) 
     replay = pd.DataFrame(replay_rows)
     campaign.to_csv(RESULTS / "campaign.csv", index=False)
     replay.to_csv(RESULTS / "heldout_replay.csv", index=False)
-    (RESULTS / "schedules.json").write_text(json.dumps(schedules, indent=2), encoding="utf-8")
+    (RESULTS / "schedules.json").write_text(
+        json.dumps(schedules, indent=2), encoding="utf-8"
+    )
 
     state_rows = []
     within_run_q02 = []
@@ -587,7 +678,9 @@ def run_campaign(n_seeds: int, replays: int, time_limit_s: float, workers: int) 
                 "headroom_under_26kW_kW": (FEEDER_CAP_W - N_NODES * idle) / 1000.0,
             }
         )
-    pd.DataFrame(state_rows).to_csv(RESULTS / "state_boundary_sensitivity.csv", index=False)
+    pd.DataFrame(state_rows).to_csv(
+        RESULTS / "state_boundary_sensitivity.csv", index=False
+    )
 
     replay_summary = (
         replay.groupby("mode")
@@ -615,10 +708,19 @@ def run_campaign(n_seeds: int, replays: int, time_limit_s: float, workers: int) 
             median_work=("work", "median"),
             median_admitted_jobs=("n_admitted_jobs", "median"),
             median_peak_kW=("peak_W", lambda x: x.median() / 1000.0),
-            median_earliest_peak_kW=("earliest_feasible_peak_W", lambda x: x.median() / 1000.0),
+            median_earliest_peak_kW=(
+                "earliest_feasible_peak_W",
+                lambda x: x.median() / 1000.0,
+            ),
             median_paired_peak_reduction_pct=("paired_peak_reduction_pct", "median"),
-            q25_paired_peak_reduction_pct=("paired_peak_reduction_pct", lambda x: x.quantile(0.25)),
-            q75_paired_peak_reduction_pct=("paired_peak_reduction_pct", lambda x: x.quantile(0.75)),
+            q25_paired_peak_reduction_pct=(
+                "paired_peak_reduction_pct",
+                lambda x: x.quantile(0.25),
+            ),
+            q75_paired_peak_reduction_pct=(
+                "paired_peak_reduction_pct",
+                lambda x: x.quantile(0.75),
+            ),
             median_solve_s=("solve_s", "median"),
         )
         .reset_index()
@@ -652,25 +754,57 @@ def run_campaign(n_seeds: int, replays: int, time_limit_s: float, workers: int) 
         "campaign": campaign_summary.to_dict(orient="records"),
         "heldout_replay": replay_summary.to_dict(orient="records"),
         "template_error": {
-            "median_abs_duration_error_pct": float(template_audit["duration_error_pct"].abs().median()),
-            "median_abs_energy_error_pct": float(template_audit["energy_error_pct"].abs().median()),
-            "median_abs_peak_error_pct": float(template_audit["peak_error_pct"].abs().median()),
-            "p95_abs_duration_error_pct": float(template_audit["duration_error_pct"].abs().quantile(0.95)),
-            "p95_abs_energy_error_pct": float(template_audit["energy_error_pct"].abs().quantile(0.95)),
-            "p95_abs_peak_error_pct": float(template_audit["peak_error_pct"].abs().quantile(0.95)),
+            "median_abs_duration_error_pct": float(
+                template_audit["duration_error_pct"].abs().median()
+            ),
+            "median_abs_energy_error_pct": float(
+                template_audit["energy_error_pct"].abs().median()
+            ),
+            "median_abs_peak_error_pct": float(
+                template_audit["peak_error_pct"].abs().median()
+            ),
+            "p95_abs_duration_error_pct": float(
+                template_audit["duration_error_pct"].abs().quantile(0.95)
+            ),
+            "p95_abs_energy_error_pct": float(
+                template_audit["energy_error_pct"].abs().quantile(0.95)
+            ),
+            "p95_abs_peak_error_pct": float(
+                template_audit["peak_error_pct"].abs().quantile(0.95)
+            ),
         },
     }
-    (RESULTS / "revision_summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
+    (RESULTS / "revision_summary.json").write_text(
+        json.dumps(summary, indent=2), encoding="utf-8"
+    )
     print(json.dumps(summary, indent=2))
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--seeds", type=int, default=24)
-    parser.add_argument("--replays", type=int, default=200)
-    parser.add_argument("--time-limit", type=float, default=120.0)
-    parser.add_argument("--workers", type=int, default=1)
+    parser = argparse.ArgumentParser(
+        description="Run the PowerShape-Q scheduling and held-out replay campaign."
+    )
+    parser.add_argument(
+        "--seeds", type=int, default=24, help="Number of instance seeds."
+    )
+    parser.add_argument(
+        "--replays",
+        type=int,
+        default=200,
+        help="Held-out draws per seed and formulation.",
+    )
+    parser.add_argument(
+        "--time-limit",
+        type=float,
+        default=120.0,
+        help="MILP limit per optimisation stage.",
+    )
+    parser.add_argument(
+        "--workers", type=int, default=1, help="Parallel worker processes."
+    )
     args = parser.parse_args()
+    if args.seeds < 1 or args.replays < 1 or args.time_limit <= 0 or args.workers < 1:
+        parser.error("seeds, replays, time-limit and workers must all be positive")
     run_campaign(args.seeds, args.replays, args.time_limit, args.workers)
 
 

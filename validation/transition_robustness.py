@@ -10,19 +10,14 @@ from __future__ import annotations
 
 import argparse
 import json
-import sys
 import time
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from dataclasses import replace
-from pathlib import Path
 
 import numpy as np
 import pandas as pd
 
-
-HERE = Path(__file__).resolve().parent
-sys.path.insert(0, str(HERE))
-import run_revision_experiments as mod  # noqa: E402
+from scheduling import campaign as mod
 
 
 TAUS = tuple(range(1, 6))
@@ -60,9 +55,7 @@ def build_transition_uncertainty():
 
         robust_ramps = {}
         for horizon in mod.RAMP_CAPS_W_PER_S:
-            ramp_len = max(
-                v.ramp_bounds["robust"][horizon][0].size for v in variants
-            )
+            ramp_len = max(v.ramp_bounds["robust"][horizon][0].size for v in variants)
             lows = []
             highs = []
             for variant in variants:
@@ -93,17 +86,17 @@ def run_seed(seed, cells, traces_by_tau, replays, time_limit_s):
     elapsed = time.perf_counter() - t0
     peak_metrics = mod.nominal_metrics(instance, mats, peak["selected"])
     earliest_metrics = mod.nominal_metrics(instance, mats, earliest["selected"])
-    reduction = 100.0 * (
-        earliest_metrics["peak_W"] - peak_metrics["peak_W"]
-    ) / earliest_metrics["peak_W"]
+    reduction = (
+        100.0
+        * (earliest_metrics["peak_W"] - peak_metrics["peak_W"])
+        / earliest_metrics["peak_W"]
+    )
     campaign = {
         "seed": seed,
         "transition_min_s": min(TAUS),
         "transition_max_s": max(TAUS),
         "work": work["work"],
-        "n_admitted_jobs": len(
-            {instance.placements[v].job for v in work["selected"]}
-        ),
+        "n_admitted_jobs": len({instance.placements[v].job for v in work["selected"]}),
         "work_certified": work["certified"],
         "peak_certified": peak["certified"],
         "earliest_certified": earliest["certified"],
@@ -191,9 +184,7 @@ def main() -> None:
         campaign_df = pd.concat([old_campaign, campaign_df], ignore_index=True)
         replay_df = pd.concat([old_replay, replay_df], ignore_index=True)
     campaign_df = campaign_df.sort_values("seed")
-    replay_df = replay_df.sort_values(
-        ["transition_s", "seed", "replay"]
-    )
+    replay_df = replay_df.sort_values(["transition_s", "seed", "replay"])
     campaign_df.to_csv(campaign_path, index=False)
     replay_df.to_csv(replay_path, index=False)
 
@@ -212,9 +203,7 @@ def main() -> None:
         )
         .reset_index()
     )
-    summary.to_csv(
-        mod.RESULTS / "transition_uncertainty_summary.csv", index=False
-    )
+    summary.to_csv(mod.RESULTS / "transition_uncertainty_summary.csv", index=False)
 
     audit = {
         "transition_uncertainty_s": list(TAUS),
@@ -222,11 +211,13 @@ def main() -> None:
             "pointwise upper/lower training envelope over all integer durations"
         ),
         "instances": int(campaign_df.seed.nunique()),
-        "replays_per_duration": int(replay_df[replay_df.transition_s == min(TAUS)].shape[0]),
+        "replays_per_duration": int(
+            replay_df[replay_df.transition_s == min(TAUS)].shape[0]
+        ),
         "all_stages_certified": bool(
-            campaign_df[
-                ["work_certified", "peak_certified", "earliest_certified"]
-            ].to_numpy().all()
+            campaign_df[["work_certified", "peak_certified", "earliest_certified"]]
+            .to_numpy()
+            .all()
         ),
         "median_admitted_requests": float(campaign_df.work.median()),
         "median_admitted_jobs": float(campaign_df.n_admitted_jobs.median()),

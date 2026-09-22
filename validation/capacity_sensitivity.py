@@ -1,52 +1,48 @@
 """Certified robust admission sensitivity to the total-IT feeder limit.
 
 All data, splits, templates, transition assumptions, release/deadline windows
-and ramp constraints are inherited unchanged from run_revision_experiments.
+and ramp constraints are inherited unchanged from ``scheduling.campaign``.
 Only the total-IT feeder limit is varied.
 """
 
 from __future__ import annotations
 
-import importlib.util
 import json
-import sys
 from concurrent.futures import ProcessPoolExecutor, as_completed
-from pathlib import Path
 
-import numpy as np
 import pandas as pd
 
-
-HERE = Path(__file__).resolve().parent
-SPEC = importlib.util.spec_from_file_location(
-    "revision_experiments_capacity", HERE / "run_revision_experiments.py"
-)
-mod = importlib.util.module_from_spec(SPEC)
-assert SPEC.loader is not None
-sys.modules[SPEC.name] = mod
-SPEC.loader.exec_module(mod)
+from scheduling import campaign as mod
 
 CAPS_KW = (10, 12, 14, 16, 18, 20, 22, 26)
 N_SEEDS = 24
+SOLVER_TIME_LIMIT_S = 300.0
 
 
-def run_cap(cap_kW: int) -> list[dict]:
-    mod.FEEDER_CAP_W = float(cap_kW * 1000)
+def run_cap(cap_kw: int) -> list[dict]:
+    """Solve the certified robust admission problem at one feeder cap."""
+
+    mod.FEEDER_CAP_W = float(cap_kw * 1000)
     cells, _, _ = mod.build_cells()
     rows: list[dict] = []
     for seed in range(N_SEEDS):
         instance = mod.build_instance(cells, seed)
         mats = mod.matrices(instance, cells, "robust")
-        result = mod.solve_work(instance, mats, time_limit_s=300.0)
-        metrics = mod.nominal_metrics(instance, mats, result["selected"])
+        admission = mod.solve_work(instance, mats, time_limit_s=SOLVER_TIME_LIMIT_S)
+        if not admission["certified"]:
+            raise RuntimeError(
+                f"admission stage is uncertified for cap={cap_kw} kW, seed={seed}"
+            )
+        metrics = mod.nominal_metrics(instance, mats, admission["selected"])
+        admitted_jobs = {instance.placements[v].job for v in admission["selected"]}
         rows.append(
             {
-                "cap_kW": cap_kW,
+                "cap_kW": cap_kw,
                 "seed": seed,
-                "certified": result["certified"],
-                "mip_gap": result["mip_gap"],
-                "admitted_requests": result["work"],
-                "admitted_jobs": len(result["selected"]),
+                "certified": True,
+                "mip_gap": admission["mip_gap"],
+                "admitted_requests": admission["work"],
+                "admitted_jobs": len(admitted_jobs),
                 "robust_peak_kW": metrics["peak_W"] / 1000.0,
                 "robust_ramp_ratio": metrics["ramp_ratio"],
             }

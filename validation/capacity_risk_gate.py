@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import numpy as np
 import pandas as pd
 from scipy.stats import beta
 
@@ -16,6 +15,12 @@ MAX_POWER_VIOLATION_PROBABILITY = 0.01
 
 
 def upper_clopper_pearson(k: int, n: int, confidence: float) -> float:
+    if n <= 0:
+        raise ValueError("n must be positive")
+    if k < 0 or k > n:
+        raise ValueError("k must lie between zero and n")
+    if not 0.0 < confidence < 1.0:
+        raise ValueError("confidence must lie strictly between zero and one")
     if k >= n:
         return 1.0
     return float(beta.ppf(confidence, k + 1, n - k))
@@ -40,6 +45,8 @@ def main() -> None:
     for cap, violations in rows:
         n = int(violations.size)
         k = int(violations.sum())
+        if n == 0:
+            raise RuntimeError(f"no held-out replay records for cap={cap:g} kW")
         observed = k / n
         upper = upper_clopper_pearson(k, n, CONFIDENCE)
         output.append(
@@ -50,8 +57,7 @@ def main() -> None:
                 "observed_probability": observed,
                 "upper_95_probability": upper,
                 "risk_target": MAX_POWER_VIOLATION_PROBABILITY,
-                "deployment_gate_pass": upper
-                <= MAX_POWER_VIOLATION_PROBABILITY,
+                "deployment_gate_pass": upper <= MAX_POWER_VIOLATION_PROBABILITY,
             }
         )
     result = pd.DataFrame(output).sort_values("cap_kW")

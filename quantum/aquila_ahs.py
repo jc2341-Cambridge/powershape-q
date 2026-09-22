@@ -98,16 +98,27 @@ def build_program(evolution_us: float) -> AnalogHamiltonianSimulation:
         amplitude.put(time_s, value)
     for time_s, value in zip(
         times,
-        (-DETUNING_MAX_RAD_S, -DETUNING_MAX_RAD_S, DETUNING_MAX_RAD_S, DETUNING_MAX_RAD_S),
+        (
+            -DETUNING_MAX_RAD_S,
+            -DETUNING_MAX_RAD_S,
+            DETUNING_MAX_RAD_S,
+            DETUNING_MAX_RAD_S,
+        ),
     ):
         detuning.put(time_s, value)
     phase = TimeSeries().put(0.0, 0.0).put(duration, 0.0)
 
     weights = np.asarray(REDUCED_INSTANCE.weights, dtype=float)
     span = float(np.ptp(weights))
-    pattern = np.ones_like(weights) if span == 0 else 0.35 + 0.65 * (weights - weights.min()) / span
+    pattern = (
+        np.ones_like(weights)
+        if span == 0
+        else 0.35 + 0.65 * (weights - weights.min()) / span
+    )
     local_magnitude = TimeSeries()
-    for time_s, value in zip(times, (0.0, 0.0, 0.4 * DETUNING_MAX_RAD_S, 0.4 * DETUNING_MAX_RAD_S)):
+    for time_s, value in zip(
+        times, (0.0, 0.0, 0.4 * DETUNING_MAX_RAD_S, 0.4 * DETUNING_MAX_RAD_S)
+    ):
         local_magnitude.put(time_s, value)
 
     register = AtomArrangement()
@@ -121,7 +132,9 @@ def build_program(evolution_us: float) -> AnalogHamiltonianSimulation:
 
 
 def _independent(bitstring: str) -> bool:
-    return all(not (bitstring[i] == "1" and bitstring[j] == "1") for i, j in CONFLICT_EDGES)
+    return all(
+        not (bitstring[i] == "1" and bitstring[j] == "1") for i, j in CONFLICT_EDGES
+    )
 
 
 def _decode_measurements(measurements) -> dict:
@@ -160,11 +173,15 @@ def main() -> None:
     parser = argparse.ArgumentParser(
         description="Validate or submit the PowerShape-Q Aquila protocol."
     )
-    parser.add_argument("--evolution-us", type=float, choices=(2.0, 4.0, 8.0), default=4.0)
+    parser.add_argument(
+        "--evolution-us", type=float, choices=(2.0, 4.0, 8.0), default=4.0
+    )
     parser.add_argument("--shots", type=int, default=DEFAULT_SHOTS)
     parser.add_argument("--repetitions", type=int, default=DEFAULT_REPETITIONS)
     parser.add_argument("--device-arn", default=os.getenv("POWERSHAPE_Q_AQUILA_ARN"))
-    parser.add_argument("--s3-bucket", default=os.getenv("AMZN_BRAKET_TASK_RESULTS_S3_BUCKET"))
+    parser.add_argument(
+        "--s3-bucket", default=os.getenv("AMZN_BRAKET_TASK_RESULTS_S3_BUCKET")
+    )
     parser.add_argument("--s3-prefix", default="powershape-q/aquila")
     parser.add_argument("--reservation-arn", default=None)
     parser.add_argument("--submit", action="store_true")
@@ -183,7 +200,10 @@ def main() -> None:
 
     programme = build_program(args.evolution_us)
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-    output = args.output or Path("results") / "qpu" / f"aquila_{args.evolution_us:g}us_{stamp}.json"
+    output = (
+        args.output
+        or Path("results") / "qpu" / f"aquila_{args.evolution_us:g}us_{stamp}.json"
+    )
     payload = {
         "project": "PowerShape-Q",
         "protocol": "reduced positive unit-disk AHS",
@@ -224,7 +244,9 @@ def main() -> None:
         }
         if args.wait:
             result = task.result()
-            record.update({"state": task.state(), **_decode_measurements(result.measurements)})
+            record.update(
+                {"state": task.state(), **_decode_measurements(result.measurements)}
+            )
         payload["tasks"].append(record)
         _write_json(output, payload)
         print(f"Submitted Aquila task {repetition + 1}/{args.repetitions}: {task.id}")

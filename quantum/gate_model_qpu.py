@@ -62,7 +62,9 @@ def _parser(target: str) -> argparse.ArgumentParser:
         default=os.getenv(f"POWERSHAPE_Q_{provider}_ARN"),
         help=f"Amazon Braket device ARN or POWERSHAPE_Q_{provider}_ARN.",
     )
-    parser.add_argument("--s3-bucket", default=os.getenv("AMZN_BRAKET_TASK_RESULTS_S3_BUCKET"))
+    parser.add_argument(
+        "--s3-bucket", default=os.getenv("AMZN_BRAKET_TASK_RESULTS_S3_BUCKET")
+    )
     parser.add_argument("--s3-prefix", default=f"powershape-q/{target}")
     parser.add_argument("--reservation-arn", default=None)
     parser.add_argument(
@@ -86,7 +88,9 @@ def main(target: str) -> None:
     if args.wait and not args.submit:
         raise SystemExit("--wait requires --submit")
     if args.submit and not args.device_arn:
-        raise SystemExit("--submit requires --device-arn or the matching environment variable")
+        raise SystemExit(
+            "--submit requires --device-arn or the matching environment variable"
+        )
     if args.device_arn and f"/{target}/" not in args.device_arn.lower():
         raise SystemExit(f"device ARN does not identify an {target} target")
 
@@ -94,7 +98,9 @@ def main(target: str) -> None:
     synthesis = "zz" if target == "ionq" else "cnot"
     circuit = build_qaoa_circuit(parameters, two_qubit_synthesis=synthesis)
     stamp = _utc_stamp()
-    output = args.output or Path("results") / "qpu" / f"{target}_p{args.depth}_{stamp}.json"
+    output = (
+        args.output or Path("results") / "qpu" / f"{target}_p{args.depth}_{stamp}.json"
+    )
     payload = {
         "project": "PowerShape-Q",
         "protocol": "reduced signed QAOA",
@@ -135,7 +141,9 @@ def main(target: str) -> None:
         }
         if args.wait:
             result = task.result()
-            counts = canonical_counts(dict(result.measurement_counts), REDUCED_INSTANCE.n_variables)
+            counts = canonical_counts(
+                dict(result.measurement_counts), REDUCED_INSTANCE.n_variables
+            )
             record.update(
                 {
                     "state": task.state(),

@@ -2,23 +2,12 @@
 
 from __future__ import annotations
 
-import importlib.util
 import json
-import sys
-from pathlib import Path
 
 import numpy as np
 import pandas as pd
 
-
-HERE = Path(__file__).resolve().parent
-SPEC = importlib.util.spec_from_file_location(
-    "revision_experiments", HERE / "run_revision_experiments.py"
-)
-mod = importlib.util.module_from_spec(SPEC)
-assert SPEC.loader is not None
-sys.modules[SPEC.name] = mod
-SPEC.loader.exec_module(mod)
+from scheduling import campaign as mod
 
 
 def instance_from_payload(seed: int, payload: dict) -> mod.Instance:
@@ -65,8 +54,8 @@ def replay_with_idle(
             extra = end - q_total.size
             q_total = np.pad(q_total, (0, extra))
             occupancy = np.pad(occupancy, (0, extra))
-        q_total[p.start:end] += q
-        occupancy[p.start:end] += 1
+        q_total[p.start : end] += q
+        occupancy[p.start : end] += 1
         deadline_violation |= bool(end - 1 > instance.deadline[p.job])
     total = mod.N_NODES * idle_W + q_total
     power_violation = bool(np.max(total) > mod.FEEDER_CAP_W + 1e-6)
@@ -110,9 +99,7 @@ def summarise(frame: pd.DataFrame, key: str) -> pd.DataFrame:
 
 
 def main() -> None:
-    schedules = json.loads(
-        (mod.RESULTS / "schedules.json").read_text(encoding="utf-8")
-    )
+    schedules = json.loads((mod.RESULTS / "schedules.json").read_text(encoding="utf-8"))
     transition_rows: list[dict] = []
     for transition_s in (1, 2, 5):
         cells, traces, _ = mod.build_cells(transition_s=transition_s)
@@ -125,14 +112,17 @@ def main() -> None:
                     instance, payload["selected"], cells, traces, rng
                 )
                 transition_rows.append(
-                    {"transition_s": transition_s, "seed": seed, "replay": rep, **record}
+                    {
+                        "transition_s": transition_s,
+                        "seed": seed,
+                        "replay": rep,
+                        **record,
+                    }
                 )
     transition = pd.DataFrame(transition_rows)
     transition.to_csv(mod.RESULTS / "transition_replay.csv", index=False)
     transition_summary = summarise(transition, "transition_s")
-    transition_summary.to_csv(
-        mod.RESULTS / "transition_sensitivity.csv", index=False
-    )
+    transition_summary.to_csv(mod.RESULTS / "transition_sensitivity.csv", index=False)
 
     cells, traces, _ = mod.build_cells(transition_s=2)
     service_ready = float(np.median([c.service_ready_W for c in cells.values()]))
@@ -146,7 +136,9 @@ def main() -> None:
         for seed in range(24):
             payload = schedules[f"{seed}:robust"]
             instance = instance_from_payload(seed, payload)
-            rng = np.random.default_rng(800_000 + 10_000 * list(states).index(state) + seed)
+            rng = np.random.default_rng(
+                800_000 + 10_000 * list(states).index(state) + seed
+            )
             for rep in range(200):
                 record = replay_with_idle(
                     instance,
@@ -174,9 +166,7 @@ def main() -> None:
         "idle_W_per_node",
         state_summary["state"].map(states),
     )
-    state_summary.to_csv(
-        mod.RESULTS / "idle_state_sensitivity.csv", index=False
-    )
+    state_summary.to_csv(mod.RESULTS / "idle_state_sensitivity.csv", index=False)
     print("Transition sensitivity")
     print(transition_summary.to_string(index=False))
     print("\nState sensitivity")

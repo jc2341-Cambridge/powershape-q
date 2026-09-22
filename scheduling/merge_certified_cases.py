@@ -25,7 +25,9 @@ def main() -> None:
         for key, value in row.items():
             if key in campaign.columns:
                 campaign.loc[mask, key] = value
-        replay = replay[~((replay["seed"] == row["seed"]) & (replay["mode"] == row["mode"]))]
+        replay = replay[
+            ~((replay["seed"] == row["seed"]) & (replay["mode"] == row["mode"]))
+        ]
         replay = pd.concat([replay, pd.DataFrame(payload["replay"])], ignore_index=True)
         schedules[f"{row['seed']}:{row['mode']}"] = payload["schedule"]
 
@@ -33,9 +35,13 @@ def main() -> None:
     replay = replay.sort_values(["seed", "mode", "replay"]).reset_index(drop=True)
     campaign.to_csv(RESULTS / "campaign.csv", index=False)
     replay.to_csv(RESULTS / "heldout_replay.csv", index=False)
-    (RESULTS / "schedules.json").write_text(json.dumps(schedules, indent=2), encoding="utf-8")
+    (RESULTS / "schedules.json").write_text(
+        json.dumps(schedules, indent=2), encoding="utf-8"
+    )
 
-    summary = json.loads((RESULTS / "revision_summary.json").read_text(encoding="utf-8"))
+    summary = json.loads(
+        (RESULTS / "revision_summary.json").read_text(encoding="utf-8")
+    )
     campaign_summary = (
         campaign.groupby("mode")
         .agg(
@@ -46,10 +52,19 @@ def main() -> None:
             median_work=("work", "median"),
             median_admitted_jobs=("n_admitted_jobs", "median"),
             median_peak_kW=("peak_W", lambda x: x.median() / 1000.0),
-            median_earliest_peak_kW=("earliest_feasible_peak_W", lambda x: x.median() / 1000.0),
+            median_earliest_peak_kW=(
+                "earliest_feasible_peak_W",
+                lambda x: x.median() / 1000.0,
+            ),
             median_paired_peak_reduction_pct=("paired_peak_reduction_pct", "median"),
-            q25_paired_peak_reduction_pct=("paired_peak_reduction_pct", lambda x: x.quantile(0.25)),
-            q75_paired_peak_reduction_pct=("paired_peak_reduction_pct", lambda x: x.quantile(0.75)),
+            q25_paired_peak_reduction_pct=(
+                "paired_peak_reduction_pct",
+                lambda x: x.quantile(0.25),
+            ),
+            q75_paired_peak_reduction_pct=(
+                "paired_peak_reduction_pct",
+                lambda x: x.quantile(0.75),
+            ),
             median_solve_s=("solve_s", "median"),
         )
         .reset_index()
@@ -72,8 +87,18 @@ def main() -> None:
     )
     summary["campaign"] = campaign_summary.to_dict(orient="records")
     summary["heldout_replay"] = replay_summary.to_dict(orient="records")
-    (RESULTS / "revision_summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
-    print(json.dumps({"campaign": summary["campaign"], "heldout_replay": summary["heldout_replay"]}, indent=2))
+    (RESULTS / "revision_summary.json").write_text(
+        json.dumps(summary, indent=2), encoding="utf-8"
+    )
+    print(
+        json.dumps(
+            {
+                "campaign": summary["campaign"],
+                "heldout_replay": summary["heldout_replay"],
+            },
+            indent=2,
+        )
+    )
 
 
 if __name__ == "__main__":

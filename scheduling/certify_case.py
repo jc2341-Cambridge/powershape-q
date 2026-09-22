@@ -3,22 +3,11 @@
 from __future__ import annotations
 
 import argparse
-import importlib.util
 import json
-import sys
-from pathlib import Path
 
 import numpy as np
 
-
-HERE = Path(__file__).resolve().parent
-SPEC = importlib.util.spec_from_file_location(
-    "revision_experiments", HERE / "run_revision_experiments.py"
-)
-mod = importlib.util.module_from_spec(SPEC)
-assert SPEC.loader is not None
-sys.modules[SPEC.name] = mod
-SPEC.loader.exec_module(mod)
+from scheduling import campaign as mod
 
 
 def main() -> None:
@@ -37,17 +26,17 @@ def main() -> None:
     earliest = mod.solve_earliest(instance, mats, work["selected"], args.time_limit)
     peak_metrics = mod.nominal_metrics(instance, mats, peak["selected"])
     earliest_metrics = mod.nominal_metrics(instance, mats, earliest["selected"])
-    reduction = 100.0 * (
-        earliest_metrics["peak_W"] - peak_metrics["peak_W"]
-    ) / earliest_metrics["peak_W"]
+    reduction = (
+        100.0
+        * (earliest_metrics["peak_W"] - peak_metrics["peak_W"])
+        / earliest_metrics["peak_W"]
+    )
     row = {
         "seed": args.seed,
         "mode": args.mode,
         "n_variables": len(instance.placements),
         "work": work["work"],
-        "n_admitted_jobs": len(
-            {instance.placements[v].job for v in work["selected"]}
-        ),
+        "n_admitted_jobs": len({instance.placements[v].job for v in work["selected"]}),
         "work_certified": work["certified"],
         "work_mip_gap": work["mip_gap"],
         "peak_certified": peak["certified"],
