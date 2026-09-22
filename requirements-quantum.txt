@@ -1,0 +1,2 @@
+-r requirements.txt
+amazon-braket-sdk==1.124.0

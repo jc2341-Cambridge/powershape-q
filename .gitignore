@@ -2,6 +2,11 @@ __pycache__/
 *.py[cod]
 .venv/
 venv/
+.env
+.env.*
+!.env.example
+.aws/
+credentials
 results/
 *.log
 .DS_Store

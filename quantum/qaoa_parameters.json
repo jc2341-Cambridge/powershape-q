@@ -1,0 +1,13 @@
+{
+  "coefficient_convention": "Binary QUBO mapped with x=(1-Z)/2 and divided by the largest absolute non-constant Ising coefficient",
+  "selection_method": "Deterministic exact-expectation optimisation on the frozen eight-variable coefficient matrix",
+  "selection_seed": 20260922,
+  "p1": {
+    "gamma_rad": [0.40944300195277755],
+    "beta_rad": [1.1827081732672005]
+  },
+  "p2": {
+    "gamma_rad": [0.41786124177839135, 1.8718170696561],
+    "beta_rad": [1.1783479581977327, 1.5356831948622767]
+  }
+}

@@ -13,9 +13,9 @@ from scipy.optimize import Bounds, LinearConstraint, milp
 from scipy.sparse import coo_matrix
 
 
-HERE = Path(__file__).resolve().parent
+ROOT = Path(__file__).resolve().parents[1]
 SPEC = importlib.util.spec_from_file_location(
-    "revision_experiments", HERE / "run_revision_experiments.py"
+    "revision_experiments", ROOT / "scripts" / "run_revision_experiments.py"
 )
 mod = importlib.util.module_from_spec(SPEC)
 assert SPEC.loader is not None
@@ -23,7 +23,9 @@ sys.modules[SPEC.name] = mod
 SPEC.loader.exec_module(mod)
 
 
-def pairwise_graph(instance: mod.Instance, mats: dict) -> tuple[list[tuple[int, int]], dict[str, int]]:
+def pairwise_graph(
+    instance: mod.Instance, mats: dict
+) -> tuple[list[tuple[int, int]], dict[str, int]]:
     edges: list[tuple[int, int]] = []
     reasons = {"same_job": 0, "power": 0, "ramp": 0}
     n = len(instance.placements)
@@ -74,7 +76,9 @@ def solve_mwis(instance: mod.Instance, edges: list[tuple[int, int]]) -> dict:
     return {
         "selected": selected,
         "work": float(weights[selected].sum()) if selected else 0.0,
-        "certified": bool(result.status == 0 and result.mip_gap is not None and result.mip_gap <= 1e-8),
+        "certified": bool(
+            result.status == 0 and result.mip_gap is not None and result.mip_gap <= 1e-8
+        ),
         "mip_gap": None if result.mip_gap is None else float(result.mip_gap),
     }
 

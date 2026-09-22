@@ -7,7 +7,7 @@ auditable path from physical constraints to quantum resources**
 
 [![Python 3.11](https://img.shields.io/badge/Python-3.11-3776AB?logo=python&logoColor=white)](https://www.python.org/) [![Optimisation](https://img.shields.io/badge/optimisation-SciPy%20HiGHS-8CAAE6)](https://docs.scipy.org/doc/scipy/reference/generated/scipy.optimize.milp.html) [![Evidence](https://img.shields.io/badge/evidence-measured%20H100%20traces-0F766E)](https://data.nlr.gov/submissions/312) [![Quantum study](https://img.shields.io/badge/quantum-gate--model%20%2B%20AHS-6D5ACF)](#quantum-encoding-and-hardware-study)
 
-[Method](#method) · [Results](#result-snapshot) · [Quantum hardware](#hardware-platforms) · [Reproduction](#running-the-analyses)
+[Method](#method) · [Results](#result-snapshot) · [Quantum hardware](#hardware-platforms) · [Execution](#quantum-hardware-execution) · [Reproduction](#running-the-analyses)
 
 </div>
 
@@ -201,9 +201,61 @@ QPU records are therefore diagnostic evidence about the tested encoding and
 settings. They do not replace the source verifier or support a quantum-advantage
 claim.
 
+### Quantum hardware execution
+
+The `quantum/` package implements the hardware protocols in the resource
+ledger. The binary objective is retained as a QUBO and mapped exactly through
+$x=(1-Z)/2$ before circuit construction. This distinction is essential because
+the QUBO linear coefficients are not Pauli-$Z$ fields. An exhaustive structural
+check confirms the energy identity for all 256 basis states.
+
+Install the hardware dependencies and validate every workflow locally:
+
+```bash
+python -m pip install -r requirements-quantum.txt
+python -m quantum.validate_workflows
+python -m quantum.ionq_qpu --depth 2
+python -m quantum.rigetti_qpu --depth 2
+python -m quantum.aquila_ahs --evolution-us 4
+```
+
+Validation creates a manifest but no cloud task. Hardware submission requires
+an explicit `--submit` flag and a device ARN supplied through the command line
+or an environment variable. For example:
+
+```bash
+export POWERSHAPE_Q_IONQ_ARN="arn:aws:braket:REGION::device/qpu/ionq/DEVICE"
+python -m quantum.ionq_qpu --depth 2 --submit --wait
+
+export POWERSHAPE_Q_RIGETTI_ARN="arn:aws:braket:REGION::device/qpu/rigetti/DEVICE"
+python -m quantum.rigetti_qpu --depth 2 --submit --wait
+
+export POWERSHAPE_Q_AQUILA_ARN="arn:aws:braket:REGION::device/qpu/quera/DEVICE"
+python -m quantum.aquila_ahs --evolution-us 4 --submit --wait
+```
+
+The gate-model defaults reproduce the registered protocol of five independent
+tasks with 4,096 shots per task. Depth two is the primary setting and depth one
+is the control. The IonQ path retains one logical `ZZ` rotation per coupling;
+the Rigetti path uses the exact CNOT--$R_Z$--CNOT synthesis before device
+compilation and routing. The Aquila default is five tasks with 1,000 shots at 4
+microseconds; the 2 and 8 microsecond sensitivities are selected with
+`--evolution-us`. AWS credentials and the optional result-bucket setting are
+resolved by the standard AWS SDK credential chain and are never stored in this
+repository. Task manifests and returned counts are written beneath
+`results/qpu/`.
+
+If a command is submitted without `--wait`, collect the completed tasks later
+from its saved manifest:
+
+```bash
+python -m quantum.collect_qpu_results results/qpu/MANIFEST.json
+```
+
 ## Repository layout
 
-All executable files are kept in the single `scripts/` directory.
+Classical scheduling and validation live in `scripts/`. Hardware execution and
+resource accounting live in `quantum/`.
 
 | Group | Script | Purpose |
 |---|---|---|
@@ -213,7 +265,13 @@ All executable files are kept in the single `scripts/` directory.
 | Capacity validation | `compute_capacity_risk_gate.py` | Computes one-sided Clopper-Pearson bounds for the declared power-risk gate. |
 | Transition validation | `state_transition_sensitivity.py` | Replays schedules under alternative idle states and transition durations. |
 | Transition validation | `run_transition_uncertainty.py` | Re-optimises against a joint 1--5 s transition-duration envelope. |
-| Quantum resources | `quantum_resource_revision.py` | Audits pairwise leakage, quadratic interactions, slack-variable counts and architecture-level resources. |
+| Quantum resources | `quantum/resource_estimation.py` | Audits pairwise leakage, quadratic interactions, slack-variable counts and architecture-level resources. |
+| Reduced benchmark | `quantum/problem_instance.py` | Freezes the eight-variable QUBO, placement metadata and exact QUBO-to-Ising map. |
+| Gate-model circuit | `quantum/qaoa_circuit.py` | Constructs the provider-neutral $p=1$ and $p=2$ QAOA circuits. |
+| IonQ hardware | `quantum/ionq_qpu.py` | Validates or submits the five-task IonQ protocol through Amazon Braket. |
+| Rigetti hardware | `quantum/rigetti_qpu.py` | Validates or submits the five-task Rigetti protocol through Amazon Braket. |
+| QuEra hardware | `quantum/aquila_ahs.py` | Builds, discretises and submits the 2, 4 or 8 microsecond Aquila AHS protocol. |
+| Result collection | `quantum/collect_qpu_results.py` | Retrieves queued Braket tasks and appends decoded candidates to their manifest. |
 | Certification support | `rerun_uncertified_mode.py` | Re-runs an individual seed and formulation with an extended solver limit. |
 | Certification support | `merge_reruns.py` | Merges certified re-runs into the campaign outputs. |
 
@@ -292,7 +350,7 @@ python scripts/run_transition_uncertainty.py \
 Run the encoding and quantum resource audit:
 
 ```bash
-python scripts/quantum_resource_revision.py
+python -m quantum.resource_estimation
 ```
 
 If a campaign row reaches the solver time limit without certification, re-run
